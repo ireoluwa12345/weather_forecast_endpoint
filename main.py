@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Query
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
@@ -12,6 +13,19 @@ from statsmodels.tsa.stattools import adfuller
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 
 app = FastAPI()
+
+origins = [
+    "*",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
+
 
 templates = Jinja2Templates(directory="templates")
 
@@ -25,6 +39,10 @@ daily_relevant_columns = [
 ]
 
 csv_file_path = 'data/daily_cleaned_data.csv'
+
+class ForecastRequest(BaseModel):
+    start_date: date
+    end_date: date
 
 def update_csv_data():
     daily_data = pd.read_csv(csv_file_path)
@@ -76,9 +94,11 @@ def calculate_rain_probability(rain_sum):
 async def read_item(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "title": "FastAPI Example", "message": "Hello, FastAPI!"})
 
-@app.get("/daily_temperature")
-def getDailyTemperature(start_date: date = Query(...), end_date: date = Query(...)):
+@app.post("/forecast")
+def getDailyTemperature(requestData: ForecastRequest):
     today_date = date.today()
+    start_date = requestData.start_date
+    end_date = requestData.end_date
     if start_date < today_date:
         return "You can't Predict the Past"
     else:
