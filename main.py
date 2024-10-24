@@ -102,7 +102,8 @@ def getDailyTemperature(requestData: ForecastRequest):
     if start_date < today_date:
         return "You can't Predict the Past"
     else:
-        date_difference = (end_date - start_date).days + 1  # Number of days to forecast
+        date_difference = (end_date - today_date).days + 1  # Number of days to forecast
+        print(date_difference)
 
         daily_data = update_csv_data()
         # Prepare the last observations for forecasting
@@ -120,6 +121,7 @@ def getDailyTemperature(requestData: ForecastRequest):
 
         # Create a DataFrame with the forecasted values
         forecast_df = pd.DataFrame(forecasted_values, index=forecast_dates, columns=daily_data.columns)
+        print(forecast_df)
 
         # Ensure any negative values are set to zero
         forecast_df[forecast_df < 0] = 0
