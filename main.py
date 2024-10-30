@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Request, Query, HTTPException
+
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,9 +91,21 @@ def calculate_rain_probability(rain_sum):
     else:
         return min((rain_sum / 20) * 100, 100)  # Heavy rain capped at 100%
 
+        
+
 @app.get("/", response_class=HTMLResponse)
 async def read_item(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "title": "FastAPI Example", "message": "Hello, FastAPI!"})
+
+    # Endpoint 1: Home
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    """
+    GET /
+    Returns a welcome HTML message for the application.
+    """
+    return templates.TemplateResponse("index.html", {"request": request, "title": "SAAD Group Waather Project", "message": "Welcome to the Weather Forecasting API!"})
+
 
 @app.post("/forecast")
 def getDailyTemperature(requestData: ForecastRequest):
@@ -143,3 +156,98 @@ def getDailyTemperature(requestData: ForecastRequest):
         forecast_dict = forecast_df.to_dict(orient='records')
 
         return JSONResponse(content={"forecast": forecast_dict})
+
+# Endpoint 4: Rain Probability Calculation
+@app.get("/rain-probability")
+def get_rain_probability(rain_sum: float = Query(..., description="Rainfall amount for calculating probability")):
+    """
+    GET /rain-probability
+    Calculates and returns the probability of rain based on the provided rain sum.
+    """
+    probability = calculate_rain_probability(rain_sum)
+    return JSONResponse(content={"data": probability, "message": "Rain probability calculated successfully."})
+
+
+@app.get("/temperature-advisory")
+def temperature_advisory(
+    high_threshold: float = Query(30.0, description="High temperature threshold"),
+    low_threshold: float = Query(5.0, description="Low temperature threshold")
+):
+    daily_data = update_csv_data()
+    forecast = daily_data.to_dict(orient="records")  # Convert DataFrame to list of dictionaries
+    
+    advisories = []
+    for day in forecast:
+        # Check for advisory conditions
+        try:
+            if day["temperature_max"] > high_threshold or day["temperature_min"] < low_threshold:
+                advisories.append({
+                    "date": day["date"].strftime('%Y-%m-%d'),  # Convert Timestamp to string
+                    "temperature_max": day["temperature_max"],
+                    "temperature_min": day["temperature_min"]
+                })
+        except KeyError as e:
+            print(f"Key error: {e}. Check the data structure.")
+            return JSONResponse(content={"data": {}, "message": "Error occured, please try again."})
+
+    return JSONResponse(content={"data": advisories, "message": "Temperature advisory data retrieved successfully."})
+
+
+@app.get("/wind-advisory")
+def wind_advisory(threshold: float = Query(20.0, description="Wind speed threshold for advisory")):
+    forecast = update_csv_data()
+    advisories = [
+        {
+            "date": day["date"],
+            "wind_speed_max": day["wind_speed_max"]
+        }
+        for day in forecast if day["wind_speed_max"] > threshold
+    ]
+    return JSONResponse(content={"data": advisories, "message": "Wind advisory data retrieved successfully."})
+
+
+
+@app.get("/temperature-range")
+def temperature_range():
+    daily_data = update_csv_data()
+    forecast = daily_data.to_dict(orient="records")  # Convert DataFrame to list of dictionaries
+
+    temperature_range = []
+    for day in forecast:
+        try:
+            # Calculate temperature range
+            temp_range = day["temperature_max"] - day["temperature_min"]
+            
+            # Check for NaN values in the calculated range
+            if np.isnan(temp_range):
+                temp_range = 0  # Replace NaN with 0 or any other desired default value
+            
+            temperature_range.append({
+                "date": day["date"].strftime('%Y-%m-%d'),  # Ensure date is JSON serializable
+                "temperature_range": temp_range
+            })
+        except KeyError as e:
+            print(f"Key error: {e}. Check the data structure.")
+
+    return JSONResponse(content={"data": {"temperature_range": temperature_range}, "message": "Temperature range data retrieved successfully."})
+
+
+
+@app.put("/update-data")
+def update_data():
+    """
+    PUT /update-data
+    Manually triggers the update of CSV data.
+    """
+    try:
+        updated_data = update_csv_data()
+        latest_date = updated_data['date'].max().strftime('%Y-%m-%d')  # Get the latest date in the updated data
+        
+        return JSONResponse(
+            content={
+                "message": "Data successfully updated.",
+                "latest_date": latest_date
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred while updating data: {str(e)}")
