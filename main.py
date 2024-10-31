@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Query, HTTPException
-
+from typing import Optional
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +30,9 @@ app.add_middleware(
 
 templates = Jinja2Templates(directory="templates")
 
+LATITUDE = "-37.8228"
+LONGITUDE = "145.0389"
+
 var_model_path = 'model/var_model2.pkl'
 with open(var_model_path, 'rb') as file:
     var_model_fitted = pickle.load(file)
@@ -59,7 +62,7 @@ def update_csv_data():
         start_date = last_date + timedelta(days=1)
         end_date = current_date
         
-        url = f"https://archive-api.open-meteo.com/v1/archive?latitude=-37.8228&longitude=145.0389&start_date={start_date}&end_date={end_date}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max"
+        url = f"https://archive-api.open-meteo.com/v1/archive?latitude={LATITUDE}&longitude={LONGITUDE}&start_date={start_date}&end_date={end_date}&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,wind_speed_10m_max"
         response = requests.get(url)
         data = response.json()
         
@@ -91,7 +94,38 @@ def calculate_rain_probability(rain_sum):
     else:
         return min((rain_sum / 20) * 100, 100)  # Heavy rain capped at 100%
 
+
+
+# Function to fetch UV index max for a specified start date
+def fetch_uv_index_for_date(lat: float, lon: float, start_date: str, end_date: Optional[str] = None):
+    end_date = end_date if end_date else start_date  # If end_date is not provided, use start_date
+    print(start_date)
+    print(end_date)
+    try:
+        # Construct the request URL for the specific date's UV index max
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=uv_index_max,uv_index_clear_sky_max&start_date={start_date}&end_date={end_date}"
+        response = requests.get(url)
+        response.raise_for_status()  # Check for request errors
+
+        data = response.json()
         
+        # Check if the API returned UV index data
+        if 'daily' in data and 'uv_index_max' in data['daily']:
+            if start_date == end_date:
+                uv_index_data = data['daily']['uv_index_max'][0]  # Get UV index max for the specified date
+                return {"date": start_date, "uv_index_max": uv_index_max}
+            else:
+                uv_index_data = [
+                    {"date": date, "uv_index_max": uv}
+                    for date, uv in zip(data['daily']['time'], data['daily']['uv_index_max'])
+                ]
+            print(uv_index_data)
+            return uv_index_data
+        else:
+            raise HTTPException(status_code=404, detail="UV index data not found.")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch UV index data: {str(e)}")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def read_item(request: Request):
@@ -119,6 +153,8 @@ def getDailyTemperature(requestData: ForecastRequest):
         print(date_difference)
 
         daily_data = update_csv_data()
+        uv_data = fetch_uv_index_for_date(LATITUDE, LONGITUDE, start_date, end_date)
+
         # Prepare the last observations for forecasting
         daily_data['date'] = pd.to_datetime(daily_data['date'])
         daily_data.set_index('date', inplace=True)
@@ -156,6 +192,7 @@ def getDailyTemperature(requestData: ForecastRequest):
         forecast_dict = forecast_df.to_dict(orient='records')
 
         return JSONResponse(content={"forecast": forecast_dict})
+
 
 # Endpoint 4: Rain Probability Calculation
 @app.get("/rain-probability")
@@ -251,3 +288,18 @@ def update_data():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred while updating data: {str(e)}")
+    
+# Endpoint to get  UV index max for the specified start date
+@app.get("/uv-index")
+def get_uv_index_on_date(
+    start_date: str = Query(..., description="Date for which UV index is required (YYYY-MM-DD)")
+):
+    """
+    GET /uv-index
+    Fetches the UV index max for a specified date based on the provided start date.
+    """
+    uv_data = fetch_uv_index_for_date(LATITUDE, LONGITUDE, start_date, start_date)
+
+    return JSONResponse(content={"data": uv_data, "message": f"UV index max for {start_date} retrieved successfully."})
+
+# fetch_uv_index_for_date(LATITUDE, LONGITUDE, "2024-10-31", "2024-11-10")
